@@ -22,6 +22,8 @@ module.exports = NodeHelper.create({
 
   start: function () {
     this.configs = {};
+    this.fetchTimers = {};
+    this.loading = {};
     this.aircraftDbCache = {};
     this.aircraftDbCacheOrder = [];
   },
@@ -33,18 +35,49 @@ module.exports = NodeHelper.create({
 
     if (notification === ADSBRadarNotifications.CONFIG) {
       this.configs[payload.instanceId] = payload.config || {};
+      this.scheduleRefresh(payload.instanceId, 250);
       return;
     }
 
     if (notification === ADSBRadarNotifications.REQUEST) {
-      this.loadAircraft(payload.instanceId).catch((error) => {
-        Log.error(`${this.name}: ${error.message}`);
-        this.sendSocketNotification(ADSBRadarNotifications.ERROR, {
-          instanceId: payload.instanceId,
-          message: error.message
-        });
-      });
+      if (payload.config) {
+        this.configs[payload.instanceId] = payload.config;
+      }
+      this.refreshAircraft(payload.instanceId);
     }
+  },
+
+  refreshAircraft: function (instanceId) {
+    clearTimeout(this.fetchTimers[instanceId]);
+    this.fetchTimers[instanceId] = null;
+
+    if (this.loading[instanceId]) {
+      return;
+    }
+
+    this.loading[instanceId] = true;
+    this.loadAircraft(instanceId).catch((error) => {
+      Log.error(`${this.name}: ${error.message}`);
+      this.sendSocketNotification(ADSBRadarNotifications.ERROR, {
+        instanceId,
+        message: error.message
+      });
+    }).finally(() => {
+      this.loading[instanceId] = false;
+      this.scheduleRefresh(instanceId);
+    });
+  },
+
+  scheduleRefresh: function (instanceId, delay) {
+    clearTimeout(this.fetchTimers[instanceId]);
+    this.fetchTimers[instanceId] = setTimeout(() => {
+      this.refreshAircraft(instanceId);
+    }, typeof delay === "number" ? delay : this.fetchIntervalMs(instanceId));
+  },
+
+  fetchIntervalMs: function (instanceId) {
+    const config = this.configs[instanceId] || {};
+    return Math.max(1000, Number(config.fetchInterval) || 15000);
   },
 
   loadAircraft: async function (instanceId) {

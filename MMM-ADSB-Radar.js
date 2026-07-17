@@ -120,8 +120,10 @@ Module.register("MMM-ADSB-Radar", {
     clearTimeout(this.fetchTimer);
     this.fetchTimer = setTimeout(() => {
       this.sendSocketNotification(ADSBRadarNotifications.REQUEST, {
-        instanceId: this.instanceId
+        instanceId: this.instanceId,
+        config: this.config
       });
+      this.scheduleFetch();
     }, typeof delay === "number" ? delay : this.fetchIntervalMs());
   },
 
@@ -138,7 +140,6 @@ Module.register("MMM-ADSB-Radar", {
       this.aircraft = this.mergeTrackedAircraft(this.prepareAircraft(payload.aircraft || []));
       this.updateTrails(this.aircraft);
       this.updateDom(this.domAnimationSpeed());
-      this.scheduleFetch();
       return;
     }
 
@@ -147,7 +148,6 @@ Module.register("MMM-ADSB-Radar", {
       this.status = "Feed unavailable";
       this.stats = payload.stats || {};
       this.updateDom(this.domAnimationSpeed());
-      this.scheduleFetch(Math.max(this.config.fetchInterval, 30000));
     }
   },
 
