@@ -13,7 +13,8 @@
   "homepage": "https://github.com/sakowitz/MMM-ADSB-Radar#readme",
   "scripts": {
     "build:aircraft-db": "node scripts/build-aircraft-db.js",
-    "check": "node --check MMM-ADSB-Radar.js && node --check node_helper.js"
+    "check": "node --check MMM-ADSB-Radar.js && node --check node_helper.js && node --check examples/config.js && node --check scripts/build-aircraft-db.js && node --check test/label-layout.test.js",
+    "test": "node test/label-layout.test.js"
   },
   "keywords": [
     "magicmirror",

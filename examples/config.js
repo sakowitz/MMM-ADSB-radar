@@ -14,7 +14,8 @@ const sidebarDemo = {
   module: "MMM-ADSB-Radar",
   position: "top_right",
   config: {
-    radarSize: 360
+    radarSize: 360,
+    avoidLabelCollisions: true
   }
 };
 

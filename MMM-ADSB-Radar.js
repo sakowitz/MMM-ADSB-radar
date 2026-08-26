@@ -40,6 +40,8 @@ Module.register("MMM-ADSB-Radar", {
     radarSize: 360,
     animationSpeed: 0,
     showLabels: true,
+    avoidLabelCollisions: true,
+    labelCollisionPadding: 4,
     showStats: true,
     showList: true,
     listWidth: 220,
@@ -407,8 +409,12 @@ Module.register("MMM-ADSB-Radar", {
       });
     });
 
+    const labelLayoutState = {
+      placed: []
+    };
+
     this.aircraft.forEach((plane) => {
-      const marker = this.buildAircraftMarker(plane);
+      const marker = this.buildAircraftMarker(plane, labelLayoutState);
       if (marker) {
         scope.appendChild(marker);
       }
@@ -533,7 +539,7 @@ Module.register("MMM-ADSB-Radar", {
     return marker;
   },
 
-  buildAircraftMarker: function (plane) {
+  buildAircraftMarker: function (plane, labelLayoutState) {
     const position = this.pointOnScope(plane);
     if (!position) {
       return null;
@@ -541,8 +547,6 @@ Module.register("MMM-ADSB-Radar", {
 
     const marker = document.createElement("div");
     marker.className = "adsb-aircraft";
-    marker.classList.add(position.x > 68 ? "adsb-aircraft--label-left" : "adsb-aircraft--label-right");
-    marker.classList.add(position.y < 24 ? "adsb-aircraft--label-low" : "adsb-aircraft--label-high");
     if (plane.isStale) {
       marker.classList.add("adsb-aircraft--stale");
     }
@@ -582,6 +586,10 @@ Module.register("MMM-ADSB-Radar", {
     marker.appendChild(icon);
 
     if (this.config.showLabels) {
+      const labelLines = this.aircraftLabelLines(plane);
+      const labelLayout = this.resolveAircraftLabelLayout(animatedPosition.start, labelLines, labelLayoutState);
+      this.applyAircraftLabelLayout(marker, labelLayout);
+
       if (this.config.showLabelConnectors) {
         const connector = document.createElement("div");
         connector.className = "adsb-label-connector";
@@ -590,13 +598,17 @@ Module.register("MMM-ADSB-Radar", {
 
       const label = document.createElement("div");
       label.className = "adsb-aircraft-label";
-      this.aircraftLabelLines(plane).forEach((line, index) => {
+      labelLines.forEach((line, index) => {
         const labelLine = document.createElement("div");
         labelLine.className = index === 0 ? "adsb-aircraft-label-primary" : "adsb-aircraft-label-secondary";
         labelLine.textContent = line;
         label.appendChild(labelLine);
       });
       marker.appendChild(label);
+
+      if (labelLayout && labelLayoutState && Array.isArray(labelLayoutState.placed)) {
+        labelLayoutState.placed.push(labelLayout.bounds);
+      }
     }
 
     return marker;
@@ -682,6 +694,340 @@ Module.register("MMM-ADSB-Radar", {
     }
 
     return /^\d+(\.\d+)?$/.test(text) ? `${text}px` : text;
+  },
+
+  applyAircraftLabelLayout: function (marker, layout) {
+    if (!layout) {
+      return;
+    }
+
+    marker.style.setProperty("--adsb-label-left", `${layout.labelLeft}px`);
+    marker.style.setProperty("--adsb-label-top", `${layout.labelTop}px`);
+    marker.style.setProperty("--adsb-label-width", `${layout.width}px`);
+    marker.style.setProperty("--adsb-label-height", `${layout.height}px`);
+    marker.style.setProperty("--adsb-connector-left", `${layout.connector.left}px`);
+    marker.style.setProperty("--adsb-connector-top", `${layout.connector.top}px`);
+    marker.style.setProperty("--adsb-connector-width", `${layout.connector.width}px`);
+    marker.style.setProperty("--adsb-connector-angle", `${layout.connector.angleDeg}deg`);
+    marker.setAttribute("data-label-placement", layout.name);
+  },
+
+  resolveAircraftLabelLayout: function (position, labelLines, labelLayoutState) {
+    const size = this.radarPixelSize();
+    const padding = this.labelCollisionPaddingPx();
+    const metrics = this.estimatedAircraftLabelMetrics(labelLines);
+    const candidates = this.aircraftLabelCandidates(position, metrics, size, padding);
+    const placed = labelLayoutState && Array.isArray(labelLayoutState.placed) ? labelLayoutState.placed : [];
+    const avoidCollisions = this.config.avoidLabelCollisions !== false;
+    let best = null;
+
+    candidates.forEach((candidate, index) => {
+      const score = this.aircraftLabelCandidateScore(candidate, placed, size, padding, avoidCollisions, index);
+
+      if (!best || score < best.score) {
+        best = {
+          candidate,
+          score
+        };
+      }
+    });
+
+    return best ? best.candidate : null;
+  },
+
+  radarPixelSize: function () {
+    const configured = this.config ? this.config.radarSize : null;
+    const fallback = Number(this.defaults.radarSize) || 360;
+
+    if (typeof configured === "number" && Number.isFinite(configured) && configured > 0) {
+      return configured;
+    }
+
+    const match = String(configured || "").trim().match(/^(\d+(?:\.\d+)?)(?:px)?$/);
+    if (match) {
+      return Number(match[1]);
+    }
+
+    return fallback;
+  },
+
+  labelCollisionPaddingPx: function () {
+    const fallback = Number(this.defaults.labelCollisionPadding) || 4;
+    const padding = Number(this.config.labelCollisionPadding);
+    return Math.max(0, Number.isFinite(padding) ? padding : fallback);
+  },
+
+  estimatedAircraftLabelMetrics: function (labelLines) {
+    const lines = Array.isArray(labelLines) && labelLines.length > 0 ? labelLines : ["UNKNOWN"];
+    const maxChars = lines.reduce((longest, line) => Math.max(longest, String(line || "").length), 0);
+    const width = Math.min(84, Math.max(28, Math.ceil(maxChars * 6.8)));
+    const height = lines.length > 1 ? 23 : 12;
+
+    return {
+      width,
+      height
+    };
+  },
+
+  aircraftLabelCandidates: function (position, metrics, size, padding) {
+    const anchor = {
+      x: position.x / 100 * size,
+      y: position.y / 100 * size
+    };
+    const gap = 14;
+    const definitions = this.sortedAircraftLabelCandidateDefinitions(position);
+
+    return definitions.map((definition) => {
+      const rawBounds = this.aircraftLabelCandidateBounds(definition, anchor, metrics, gap);
+      const adjustedBounds = this.adjustLabelBoundsIntoScope(rawBounds, size, padding);
+      const labelLeft = Math.round((adjustedBounds.left - anchor.x) * 10) / 10;
+      const labelTop = Math.round((adjustedBounds.top - anchor.y) * 10) / 10;
+      const relativeBounds = {
+        left: labelLeft,
+        top: labelTop,
+        width: metrics.width,
+        height: metrics.height
+      };
+
+      return {
+        name: definition.name,
+        bounds: adjustedBounds,
+        connector: this.aircraftLabelConnector(relativeBounds),
+        height: metrics.height,
+        labelLeft,
+        labelTop,
+        preference: definition.preference,
+        width: metrics.width
+      };
+    });
+  },
+
+  sortedAircraftLabelCandidateDefinitions: function (position) {
+    const definitions = [
+      { name: "right-above", side: "right", vertical: "above", order: 0 },
+      { name: "right-below", side: "right", vertical: "below", order: 1 },
+      { name: "left-above", side: "left", vertical: "above", order: 2 },
+      { name: "left-below", side: "left", vertical: "below", order: 3 },
+      { name: "right-center", side: "right", vertical: "center", order: 4 },
+      { name: "left-center", side: "left", vertical: "center", order: 5 },
+      { name: "above-center", side: "center", vertical: "above", order: 6 },
+      { name: "below-center", side: "center", vertical: "below", order: 7 }
+    ];
+
+    return definitions
+      .map((definition) => Object.assign({}, definition, {
+        preference: this.aircraftLabelCandidatePreference(definition, position)
+      }))
+      .sort((a, b) => a.preference - b.preference || a.order - b.order);
+  },
+
+  aircraftLabelCandidatePreference: function (definition, position) {
+    let preference = definition.order / 100;
+
+    if (position.x > 56) {
+      preference += definition.side === "left" ? 0 : 2;
+    } else if (position.x < 44) {
+      preference += definition.side === "right" ? 0 : 2;
+    } else if (definition.side === "center") {
+      preference += 1;
+    }
+
+    if (position.y < 40) {
+      preference += definition.vertical === "below" ? 0 : 1.2;
+    } else if (position.y > 60) {
+      preference += definition.vertical === "above" ? 0 : 1.2;
+    } else if (definition.vertical === "center") {
+      preference += 0.4;
+    }
+
+    if (this.config.avoidLabelCollisions === false) {
+      const legacySide = position.x > 68 ? "left" : "right";
+      const legacyVertical = position.y < 24 ? "below" : "above";
+      if (definition.side === legacySide && definition.vertical === legacyVertical) {
+        preference -= 10;
+      }
+    }
+
+    return preference;
+  },
+
+  aircraftLabelCandidateBounds: function (definition, anchor, metrics, gap) {
+    let left;
+    let top;
+
+    if (definition.side === "left") {
+      left = anchor.x - metrics.width - gap;
+    } else if (definition.side === "right") {
+      left = anchor.x + gap;
+    } else {
+      left = anchor.x - metrics.width / 2;
+    }
+
+    if (definition.vertical === "above") {
+      top = anchor.y - metrics.height - gap;
+    } else if (definition.vertical === "below") {
+      top = anchor.y + gap;
+    } else {
+      top = anchor.y - metrics.height / 2;
+    }
+
+    return {
+      left,
+      top,
+      width: metrics.width,
+      height: metrics.height
+    };
+  },
+
+  adjustLabelBoundsIntoScope: function (bounds, size, padding) {
+    let adjusted = this.clampLabelBoundsToSquare(bounds, size, padding);
+    let overflow = this.labelScopeOverflow(adjusted, size, padding);
+
+    for (let index = 0; index < 18 && overflow > 0; index += 1) {
+      const center = this.rectCenter(adjusted);
+      const dx = size / 2 - center.x;
+      const dy = size / 2 - center.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance <= 0.01) {
+        break;
+      }
+
+      const next = this.clampLabelBoundsToSquare(Object.assign({}, adjusted, {
+        left: adjusted.left + dx / distance * 4,
+        top: adjusted.top + dy / distance * 4
+      }), size, padding);
+      const nextOverflow = this.labelScopeOverflow(next, size, padding);
+
+      if (nextOverflow > overflow) {
+        break;
+      }
+
+      adjusted = next;
+      overflow = nextOverflow;
+    }
+
+    return {
+      left: Math.round(adjusted.left * 10) / 10,
+      top: Math.round(adjusted.top * 10) / 10,
+      width: adjusted.width,
+      height: adjusted.height
+    };
+  },
+
+  clampLabelBoundsToSquare: function (bounds, size, padding) {
+    const min = padding;
+    const maxLeft = Math.max(min, size - padding - bounds.width);
+    const maxTop = Math.max(min, size - padding - bounds.height);
+
+    return Object.assign({}, bounds, {
+      left: Math.max(min, Math.min(maxLeft, bounds.left)),
+      top: Math.max(min, Math.min(maxTop, bounds.top))
+    });
+  },
+
+  aircraftLabelCandidateScore: function (candidate, placedBounds, size, padding, avoidCollisions, index) {
+    const boundsPenalty = this.labelScopeOverflow(candidate.bounds, size, padding) * 10000;
+    const overlapPenalty = avoidCollisions ?
+      placedBounds.reduce((total, placed) => total + this.rectOverlapArea(
+        this.inflateRect(candidate.bounds, padding),
+        this.inflateRect(placed, padding)
+      ), 0) * 100 :
+      0;
+
+    return boundsPenalty + overlapPenalty + candidate.preference + index / 1000;
+  },
+
+  aircraftLabelConnector: function (relativeBounds) {
+    const iconRadius = 6;
+    const labelInset = 2;
+    const edge = this.nearestPointOnRect({ x: 0, y: 0 }, relativeBounds);
+    const dx = edge.x;
+    const dy = edge.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    if (distance <= iconRadius + labelInset) {
+      return {
+        angleDeg: 0,
+        left: 0,
+        top: 0,
+        width: 0
+      };
+    }
+
+    const unitX = dx / distance;
+    const unitY = dy / distance;
+    const start = {
+      x: unitX * iconRadius,
+      y: unitY * iconRadius
+    };
+    const end = {
+      x: edge.x - unitX * labelInset,
+      y: edge.y - unitY * labelInset
+    };
+    const width = Math.sqrt(
+      (end.x - start.x) * (end.x - start.x) +
+      (end.y - start.y) * (end.y - start.y)
+    );
+
+    return {
+      angleDeg: Math.round(Math.atan2(end.y - start.y, end.x - start.x) * 1800 / Math.PI) / 10,
+      left: Math.round(start.x * 10) / 10,
+      top: Math.round(start.y * 10) / 10,
+      width: Math.round(width * 10) / 10
+    };
+  },
+
+  nearestPointOnRect: function (point, rect) {
+    return {
+      x: Math.max(rect.left, Math.min(rect.left + rect.width, point.x)),
+      y: Math.max(rect.top, Math.min(rect.top + rect.height, point.y))
+    };
+  },
+
+  labelScopeOverflow: function (bounds, size, padding) {
+    const center = size / 2;
+    const radius = size / 2 - padding;
+    const corners = [
+      { x: bounds.left, y: bounds.top },
+      { x: bounds.left + bounds.width, y: bounds.top },
+      { x: bounds.left, y: bounds.top + bounds.height },
+      { x: bounds.left + bounds.width, y: bounds.top + bounds.height }
+    ];
+    const circleOverflow = corners.reduce((total, corner) => {
+      const dx = corner.x - center;
+      const dy = corner.y - center;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      return total + Math.max(0, distance - radius);
+    }, 0);
+    const squareOverflow = Math.max(0, padding - bounds.left) +
+      Math.max(0, padding - bounds.top) +
+      Math.max(0, bounds.left + bounds.width + padding - size) +
+      Math.max(0, bounds.top + bounds.height + padding - size);
+
+    return circleOverflow + squareOverflow;
+  },
+
+  rectOverlapArea: function (a, b) {
+    const overlapWidth = Math.max(0, Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left));
+    const overlapHeight = Math.max(0, Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top));
+    return overlapWidth * overlapHeight;
+  },
+
+  inflateRect: function (rect, padding) {
+    return {
+      left: rect.left - padding,
+      top: rect.top - padding,
+      width: rect.width + padding * 2,
+      height: rect.height + padding * 2
+    };
+  },
+
+  rectCenter: function (rect) {
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2
+    };
   },
 
   headingVectorLength: function (plane) {

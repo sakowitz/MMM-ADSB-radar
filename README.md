@@ -57,7 +57,8 @@ Minimal sidebar example:
   module: "MMM-ADSB-Radar",
   position: "top_right",
   config: {
-    radarSize: 360
+    radarSize: 360,
+    avoidLabelCollisions: true
   }
 }
 ```
@@ -202,6 +203,8 @@ node scripts/build-aircraft-db.js --source /path/to/aircraftDatabase.csv
 | `radarSize` | `360` | Radar diameter. Numbers are treated as pixels; CSS lengths such as `"22rem"` also work. |
 | `animationSpeed` | `0` | MagicMirror DOM fade speed in milliseconds. Keep at `0` to avoid blink on refresh. |
 | `showLabels` | `true` | Show callsign/type labels on the scope. |
+| `avoidLabelCollisions` | `true` | Try multiple deterministic label positions and choose the readable placement with the least overlap. |
+| `labelCollisionPadding` | `4` | Extra spacing in pixels used when scoring aircraft label collisions. |
 | `showStats` | `true` | Show aircraft count, range, and update time. |
 | `showList` | `true` | Show the nearby aircraft list when `mode` is `"hybrid"` or `"list"`. |
 | `listWidth` | `220` | Width of the side list. Numbers are treated as pixels; CSS lengths also work. |

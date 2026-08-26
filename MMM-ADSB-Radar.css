@@ -260,13 +260,13 @@
 .adsb-label-connector {
   background: currentColor;
   height: 1px;
-  left: 5px;
+  left: var(--adsb-connector-left, 5px);
   opacity: 0.32;
   position: absolute;
-  top: -2px;
-  transform: rotate(-17deg);
+  top: var(--adsb-connector-top, -2px);
+  transform: rotate(var(--adsb-connector-angle, 0deg));
   transform-origin: left center;
-  width: 21px;
+  width: var(--adsb-connector-width, 21px);
   z-index: 1;
 }
 
@@ -275,15 +275,17 @@
   color: color-mix(in srgb, currentColor, white 12%);
   font-size: 11px;
   font-weight: 500;
-  left: 27px;
+  left: var(--adsb-label-left, 27px);
   line-height: 1.05;
-  max-width: 84px;
+  max-width: var(--adsb-label-width, 84px);
   overflow: hidden;
   position: absolute;
+  text-align: left;
   text-overflow: ellipsis;
   text-shadow: 0 0 4px color-mix(in srgb, var(--adsb-scope), black 65%);
-  top: -10px;
+  top: var(--adsb-label-top, -10px);
   white-space: nowrap;
+  width: var(--adsb-label-width, 84px);
 }
 
 .adsb-aircraft-label-secondary {
@@ -293,29 +295,7 @@
 }
 
 .adsb-aircraft--label-left .adsb-aircraft-label {
-  left: auto;
-  right: 27px;
-  text-align: right;
-}
-
-.adsb-aircraft--label-left .adsb-label-connector {
-  left: auto;
-  right: 5px;
-  transform: rotate(197deg);
-  transform-origin: right center;
-}
-
-.adsb-aircraft--label-low .adsb-aircraft-label {
-  top: 9px;
-}
-
-.adsb-aircraft--label-low .adsb-label-connector {
-  top: 5px;
-  transform: rotate(17deg);
-}
-
-.adsb-aircraft--label-left.adsb-aircraft--label-low .adsb-label-connector {
-  transform: rotate(163deg);
+  text-align: left;
 }
 
 .adsb-empty {
